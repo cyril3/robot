@@ -1,0 +1,8 @@
+" [gd] 跳转到定义 (Go Definition)
+nmap <silent> gd <Plug>(coc-definition)
+" [gy] 跳转到类型定义 (Go Type Definition)
+nmap <silent> gy <Plug>(coc-type-definition)
+" [gi] 跳转到实现 (Go Implementation)
+nmap <silent> gi <Plug>(coc-implementation)
+" [gr] 查看引用 (Go References)
+nmap <silent> gr <Plug>(coc-references)

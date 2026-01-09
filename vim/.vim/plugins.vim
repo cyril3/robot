@@ -6,6 +6,15 @@ Plug 'vim-airline/vim-airline'
 " 2. 状态栏主题插件 (可选，但推荐)
 Plug 'vim-airline/vim-airline-themes'
 
+Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
+Plug 'junegunn/fzf.vim'
+
+" 安装 coc.nvim，使用 release 分支
+Plug 'neoclide/coc.nvim', {'branch': 'release'}
+
+Plug 'tpope/vim-fugitive'
+Plug 'junegunn/gv.vim'
+
 call plug#end()
 
 nnoremap <leader>n :NERDTreeToggle<CR>
@@ -48,7 +57,7 @@ nnoremap <Tab> :call SmartBufferSwitch('next')<CR>
 
 " 使用 Shift + Tab 切换上一个
 nnoremap <S-Tab> :call SmartBufferSwitch('prev')<CR>
-" 使用 Tab 键切换下一个 Buffer
-"nnoremap <Tab> :bnext<CR>
-" 使用 Shift + Tab 切换上一个 Buffer
-"nnoremap <S-Tab> :bprev<CR>
+
+" 映射 Ctrl+P 为文件搜索
+nnoremap <C-p> :Files<CR>
+
