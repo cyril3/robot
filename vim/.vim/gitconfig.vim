@@ -77,7 +77,18 @@ endfunction
 " Toggle diff mode between commit and working directory
 function! s:ToggleDiffMode()
   let s:gv_diff_mode = s:gv_diff_mode == 0 ? 1 : 0
-  call s:FillDiffStatBuffer(s:gv_old_commit, s:gv_new_commit)
+  let l:mode_name = s:gv_diff_mode == 1 ? 'Working Directory' : 'Commit'
+
+  " Find diff stat window and refresh if exists
+  let l:diffstat_win = s:FindDiffStatWindow()
+  if l:diffstat_win > 0
+    let l:current_win = winnr()
+    execute l:diffstat_win . 'wincmd w'
+    call s:FillDiffStatBuffer(s:gv_old_commit, s:gv_new_commit)
+    execute l:current_win . 'wincmd w'
+  endif
+
+  echo 'Diff mode: ' . l:mode_name
 endfunction
 
 " Setup DiffStat buffer
@@ -307,6 +318,8 @@ function! s:SetupGVCustomMappings()
   nnoremap <buffer> <silent> <CR> :call <SID>GVShowDiffStat(0)<CR>
   " Visual mode: compare two commits
   xnoremap <buffer> <silent> <CR> :<C-u>call <SID>GVShowDiffStat(1)<CR>
+  " Toggle diff mode (also works in GV window)
+  nnoremap <buffer> <silent> gw :call <SID>ToggleDiffMode()<CR>
 endfunction
 
 augroup GVCustomDiffStat
