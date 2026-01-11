@@ -9,6 +9,8 @@ nnoremap <silent> <leader>gl :GV<CR>
 " Script-local variables
 let s:gv_old_commit = ''
 let s:gv_new_commit = ''
+" Diff mode: 0 = commit vs parent/commit, 1 = commit vs working directory
+let s:gv_diff_mode = 0
 
 " Find existing DiffStat window
 function! s:FindDiffStatWindow()
@@ -26,39 +28,56 @@ function! s:FillDiffStatBuffer(old_sha, new_sha)
   setlocal modifiable
   silent %delete _
 
-  " Determine diff range
-  if a:old_sha ==# a:new_sha
-    " Single commit mode: compare with parent
-    let l:range = a:old_sha . '^..' . a:old_sha
-    let l:header = '# Diff stat for: ' . a:old_sha
-  else
-    " Two commit mode: compare between commits
-    let l:range = a:old_sha . '..' . a:new_sha
-    let l:header = '# Diff stat: ' . a:old_sha[:6] . '..' . a:new_sha[:6]
-  endif
-
-  " Execute git diff --stat with full path width (no truncation)
-  let l:result = FugitiveExecute(['diff', '--stat=200,200', l:range])
-  let l:output = l:result.stdout
-
-  " Handle initial commit (no parent)
-  if l:result.exit_status != 0 && a:old_sha ==# a:new_sha
-    let l:result = FugitiveExecute(['diff-tree', '--stat=200,200', '--root', a:old_sha])
+  " Determine diff range based on mode
+  if s:gv_diff_mode == 1
+    " Working directory mode: compare commit with working directory
+    let l:result = FugitiveExecute(['diff', '--stat=200,200', a:new_sha])
     let l:output = l:result.stdout
+    let l:header = '# Diff: ' . a:new_sha[:6] . ' vs [Working Directory]'
+    let l:mode_hint = '[W] Working Dir mode - press gw to switch to Commit mode'
+  else
+    " Commit mode
+    if a:old_sha ==# a:new_sha
+      " Single commit mode: compare with parent
+      let l:range = a:old_sha . '^..' . a:old_sha
+      let l:header = '# Diff stat for: ' . a:old_sha
+    else
+      " Two commit mode: compare between commits
+      let l:range = a:old_sha . '..' . a:new_sha
+      let l:header = '# Diff stat: ' . a:old_sha[:6] . '..' . a:new_sha[:6]
+    endif
+
+    " Execute git diff --stat with full path width (no truncation)
+    let l:result = FugitiveExecute(['diff', '--stat=200,200', l:range])
+    let l:output = l:result.stdout
+
+    " Handle initial commit (no parent)
+    if l:result.exit_status != 0 && a:old_sha ==# a:new_sha
+      let l:result = FugitiveExecute(['diff-tree', '--stat=200,200', '--root', a:old_sha])
+      let l:output = l:result.stdout
+    endif
+    let l:mode_hint = '[C] Commit mode - press gw to switch to Working Dir mode'
   endif
 
   " Add header
   call setline(1, l:header)
-  call append(1, '# Press <CR> on a file to view vimdiff, q to close')
-  call append(2, '')
+  call append(1, '# ' . l:mode_hint)
+  call append(2, '# Press <CR> on a file to view vimdiff, q to close')
+  call append(3, '')
 
   " Add diff stat output
-  call append(3, l:output)
+  call append(4, l:output)
 
   setlocal nomodifiable
 
   " Move cursor to first file line (skip header)
-  normal! 4G
+  normal! 5G
+endfunction
+
+" Toggle diff mode between commit and working directory
+function! s:ToggleDiffMode()
+  let s:gv_diff_mode = s:gv_diff_mode == 0 ? 1 : 0
+  call s:FillDiffStatBuffer(s:gv_old_commit, s:gv_new_commit)
 endfunction
 
 " Setup DiffStat buffer
@@ -80,6 +99,7 @@ function! s:SetupDiffStatBuffer(old_sha, new_sha)
   " Setup keymaps
   nnoremap <buffer> <silent> <CR> :call <SID>OpenFileDiff()<CR>
   nnoremap <buffer> <silent> q :close<CR>
+  nnoremap <buffer> <silent> gw :call <SID>ToggleDiffMode()<CR>
 endfunction
 
 " Main entry: show diff --stat for selected commit(s)
@@ -190,51 +210,89 @@ function! s:OpenFileDiff()
     return
   endif
 
-  " Determine the actual refs to use for file content
-  if l:old_sha ==# l:new_sha
-    " Single commit mode: compare with parent
-    let l:old_ref = l:old_sha . '^'
-    let l:new_ref = l:new_sha
-  else
-    " Two commit mode
-    let l:old_ref = l:old_sha
-    let l:new_ref = l:new_sha
-  endif
-
-  " Use FugitiveExecute for proper git repo context
-  let l:new_result = FugitiveExecute(['show', l:new_ref . ':' . l:file])
-  let l:new_content = l:new_result.exit_status == 0 ? l:new_result.stdout : []
-
-  let l:old_result = FugitiveExecute(['show', l:old_ref . ':' . l:file])
-  let l:old_content = l:old_result.exit_status == 0 ? l:old_result.stdout : []
-
   " Save current tab number to return to later
   let s:gv_source_tab = tabpagenr()
 
-  " Open vimdiff in new tab
-  tabnew
+  if s:gv_diff_mode == 1
+    " Working directory mode: compare commit with working directory
+    let l:old_ref = l:new_sha
+    let l:old_result = FugitiveExecute(['show', l:old_ref . ':' . l:file])
+    let l:old_content = l:old_result.exit_status == 0 ? l:old_result.stdout : []
 
-  " Setup old version (left)
-  enew
-  if !empty(l:old_content)
-    call setline(1, l:old_content)
-  else
-    call setline(1, ['(File does not exist in this commit)'])
-  endif
-  setlocal buftype=nofile bufhidden=wipe noswapfile nomodifiable
-  execute 'silent file ' . l:old_ref . ':' . l:file
-  diffthis
+    " Get working directory file path
+    let l:git_root = FugitiveWorkTree()
+    let l:workdir_file = l:git_root . '/' . l:file
 
-  " Setup new version (right)
-  vertical rightbelow new
-  if !empty(l:new_content)
-    call setline(1, l:new_content)
+    " Open vimdiff in new tab
+    tabnew
+
+    " Setup commit version (left)
+    enew
+    if !empty(l:old_content)
+      call setline(1, l:old_content)
+    else
+      call setline(1, ['(File does not exist in this commit)'])
+    endif
+    setlocal buftype=nofile bufhidden=wipe noswapfile nomodifiable
+    execute 'silent file ' . l:old_ref . ':' . l:file
+    diffthis
+
+    " Setup working directory version (right)
+    if filereadable(l:workdir_file)
+      execute 'vertical rightbelow split ' . fnameescape(l:workdir_file)
+    else
+      vertical rightbelow new
+      call setline(1, ['(File does not exist in working directory)'])
+      setlocal buftype=nofile bufhidden=wipe noswapfile nomodifiable
+      execute 'silent file [WorkDir]:' . l:file
+    endif
+    diffthis
+
   else
-    call setline(1, ['(File does not exist in this commit)'])
+    " Commit mode
+    " Determine the actual refs to use for file content
+    if l:old_sha ==# l:new_sha
+      " Single commit mode: compare with parent
+      let l:old_ref = l:old_sha . '^'
+      let l:new_ref = l:new_sha
+    else
+      " Two commit mode
+      let l:old_ref = l:old_sha
+      let l:new_ref = l:new_sha
+    endif
+
+    " Use FugitiveExecute for proper git repo context
+    let l:new_result = FugitiveExecute(['show', l:new_ref . ':' . l:file])
+    let l:new_content = l:new_result.exit_status == 0 ? l:new_result.stdout : []
+
+    let l:old_result = FugitiveExecute(['show', l:old_ref . ':' . l:file])
+    let l:old_content = l:old_result.exit_status == 0 ? l:old_result.stdout : []
+
+    " Open vimdiff in new tab
+    tabnew
+
+    " Setup old version (left)
+    enew
+    if !empty(l:old_content)
+      call setline(1, l:old_content)
+    else
+      call setline(1, ['(File does not exist in this commit)'])
+    endif
+    setlocal buftype=nofile bufhidden=wipe noswapfile nomodifiable
+    execute 'silent file ' . l:old_ref . ':' . l:file
+    diffthis
+
+    " Setup new version (right)
+    vertical rightbelow new
+    if !empty(l:new_content)
+      call setline(1, l:new_content)
+    else
+      call setline(1, ['(File does not exist in this commit)'])
+    endif
+    setlocal buftype=nofile bufhidden=wipe noswapfile nomodifiable
+    execute 'silent file ' . l:new_ref . ':' . l:file
+    diffthis
   endif
-  setlocal buftype=nofile bufhidden=wipe noswapfile nomodifiable
-  execute 'silent file ' . l:new_ref . ':' . l:file
-  diffthis
 
   " Setup quit mapping for both windows
   windo nnoremap <buffer> <silent> q :call <SID>CloseVimdiffTab()<CR>
